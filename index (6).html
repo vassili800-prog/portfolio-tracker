@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -87,6 +88,7 @@
   .s-cash{background:rgba(200,169,110,0.07);color:rgba(200,169,110,0.5);}
   .loading-row td{text-align:center;padding:48px;color:var(--muted);font-size:11px;letter-spacing:0.08em;}
   .spinner{display:inline-block;width:13px;height:13px;border:1.5px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.75s linear infinite;margin-right:8px;vertical-align:middle;}
+  .wake-msg{font-size:10px;color:var(--muted);margin-top:10px;letter-spacing:0.06em;}
   .empty-state{border:1px solid var(--border);border-radius:12px;padding:72px 24px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:14px;}
   .empty-icon{width:56px;height:56px;border-radius:14px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:22px;margin-bottom:4px;}
   .empty-title{font-family:var(--font-head);font-size:16px;font-weight:600;color:var(--text);}
@@ -141,7 +143,12 @@
           </tr>
         </thead>
         <tbody id="tableBody">
-          <tr class="loading-row"><td colspan="8"><span class="spinner"></span>Loading prices…</td></tr>
+          <tr class="loading-row">
+            <td colspan="8">
+              <span class="spinner"></span>Loading prices…
+              <div class="wake-msg" id="wakeMsg"></div>
+            </td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -159,47 +166,56 @@
 
   <div class="footer">
     <div class="footer-note">
-      US prices sourced via Twelve Data · International positions reflect cost basis<br>
+      Prices sourced via Yahoo Finance · EOD pricing · Updated automatically<br>
       Allocations shown as % of total portfolio including cash · For informational purposes only
     </div>
   </div>
 </div>
 
 <script>
-const TD_KEY   = 'ff3b922434e344f3b0b75a4a0b8da435';
+// ═══════════════════════════════════
+//  CONFIG
+// ═══════════════════════════════════
+const API_URL  = 'https://price-api-gn0s.onrender.com/prices';
+const PING_URL = 'https://price-api-gn0s.onrender.com/ping';
 const CASH_USD = 69000;
-const CACHE_KEY = 'initium_prices_v4';
-const CACHE_TTL = 8 * 60 * 60 * 1000;
 
-// US stocks — live prices via Twelve Data
-// International — show avg cost cleanly (no asterisk confusion)
+// Map Yahoo Finance symbols to your display tickers
+const SYMBOL_MAP = {
+  'MSFT':'MSFT','AMZN':'AMZN','ORCL':'ORCL','ETN':'ETN','SYK':'SYK',
+  'V':'V','NFLX':'NFLX','UBER':'UBER','PANW':'PANW','LIN':'LIN',
+  'PEP':'PEP','DIS':'DIS','UPS':'UPS','OXY':'OXY','BABA':'BABA',
+  'SMCI':'SMCI','UBS':'UBS','NU':'NU',
+  'ADS.DE':'ADS','AIR.PA':'AIR','MC.PA':'MC',
+  '1810.HK':'1810','1211.HK':'1211','MTLN.L':'MTLN','EMAAR.DU':'EMAAR'
+};
+
 const HOLDINGS = [
-  { ticker:'MSFT',  name:'Microsoft',              shares:50,    avgCost:405.42, exchange:'NYSE',  sector:'tech', live:true  },
-  { ticker:'AMZN',  name:'Amazon',                 shares:100,   avgCost:209.51, exchange:'NYSE',  sector:'tech', live:true  },
-  { ticker:'ORCL',  name:'Oracle',                 shares:70,    avgCost:153.50, exchange:'NYSE',  sector:'tech', live:true  },
-  { ticker:'ETN',   name:'Eaton Corp',             shares:40,    avgCost:402.34, exchange:'NYSE',  sector:'ind',  live:true  },
-  { ticker:'SYK',   name:'Stryker',                shares:50,    avgCost:334.68, exchange:'NYSE',  sector:'hc',   live:true  },
-  { ticker:'V',     name:'Visa',                   shares:40,    avgCost:309.60, exchange:'NYSE',  sector:'fin',  live:true  },
-  { ticker:'NFLX',  name:'Netflix',                shares:120,   avgCost:84.30,  exchange:'NYSE',  sector:'tech', live:true  },
-  { ticker:'UBER',  name:'Uber Technologies',      shares:100,   avgCost:73.62,  exchange:'NYSE',  sector:'tech', live:true  },
-  { ticker:'PANW',  name:'Palo Alto Networks',     shares:30,    avgCost:149.18, exchange:'NYSE',  sector:'tech', live:true  },
-  { ticker:'LIN',   name:'Linde',                  shares:15,    avgCost:502.10, exchange:'NYSE',  sector:'ind',  live:true  },
-  { ticker:'PEP',   name:'PepsiCo',                shares:50,    avgCost:168.78, exchange:'NYSE',  sector:'cons', live:true  },
-  { ticker:'DIS',   name:'Walt Disney',            shares:50,    avgCost:100.32, exchange:'NYSE',  sector:'cons', live:true  },
-  { ticker:'UPS',   name:'UPS',                    shares:50,    avgCost:109.92, exchange:'NYSE',  sector:'ind',  live:true  },
-  { ticker:'OXY',   name:'Occidental Petroleum',   shares:100,   avgCost:47.30,  exchange:'NYSE',  sector:'ind',  live:true  },
-  { ticker:'BABA',  name:'Alibaba',                shares:40,    avgCost:122.02, exchange:'NYSE',  sector:'tech', live:true  },
-  { ticker:'SMCI',  name:'Super Micro Computer',   shares:165,   avgCost:30.64,  exchange:'NYSE',  sector:'tech', live:true  },
-  { ticker:'UBS',   name:'UBS Group',              shares:210,   avgCost:42.05,  exchange:'NYSE',  sector:'fin',  live:true  },
-  { ticker:'NU',    name:'Nu Holdings',            shares:400,   avgCost:14.52,  exchange:'NYSE',  sector:'fin',  live:true  },
-  // International — cost basis display only
-  { ticker:'ADS',   name:'Adidas AG',              shares:58,    avgCost:134.97, exchange:'IBIS',  sector:'cons', live:false },
-  { ticker:'AIR',   name:'Airbus SE',              shares:70.38, avgCost:164.08, exchange:'SBF',   sector:'ind',  live:false },
-  { ticker:'MC',    name:'LVMH',                   shares:28,    avgCost:510.26, exchange:'SBF',   sector:'cons', live:false },
-  { ticker:'1810',  name:'Xiaomi',                 shares:204,   avgCost:32.84,  exchange:'SEHK',  sector:'tech', live:false },
-  { ticker:'1211',  name:'BYD',                    shares:76.57, avgCost:98.53,  exchange:'SEHK',  sector:'tech', live:false },
-  { ticker:'MTLN',  name:'Metlen Energy & Metals', shares:146,   avgCost:35.40,  exchange:'LSE',   sector:'ind',  live:false },
-  { ticker:'EMAAR', name:'Emaar Properties',       shares:409,   avgCost:12.11,  exchange:'DFM',   sector:'re',   live:false },
+  { ticker:'MSFT',  yfSym:'MSFT',     name:'Microsoft',              shares:50,    avgCost:405.42, exchange:'NYSE',  sector:'tech' },
+  { ticker:'AMZN',  yfSym:'AMZN',     name:'Amazon',                 shares:100,   avgCost:209.51, exchange:'NYSE',  sector:'tech' },
+  { ticker:'ORCL',  yfSym:'ORCL',     name:'Oracle',                 shares:70,    avgCost:153.50, exchange:'NYSE',  sector:'tech' },
+  { ticker:'ETN',   yfSym:'ETN',      name:'Eaton Corp',             shares:40,    avgCost:402.34, exchange:'NYSE',  sector:'ind'  },
+  { ticker:'SYK',   yfSym:'SYK',      name:'Stryker',                shares:50,    avgCost:334.68, exchange:'NYSE',  sector:'hc'   },
+  { ticker:'V',     yfSym:'V',        name:'Visa',                   shares:40,    avgCost:309.60, exchange:'NYSE',  sector:'fin'  },
+  { ticker:'NFLX',  yfSym:'NFLX',     name:'Netflix',                shares:120,   avgCost:84.30,  exchange:'NYSE',  sector:'tech' },
+  { ticker:'UBER',  yfSym:'UBER',     name:'Uber Technologies',      shares:100,   avgCost:73.62,  exchange:'NYSE',  sector:'tech' },
+  { ticker:'PANW',  yfSym:'PANW',     name:'Palo Alto Networks',     shares:30,    avgCost:149.18, exchange:'NYSE',  sector:'tech' },
+  { ticker:'LIN',   yfSym:'LIN',      name:'Linde',                  shares:15,    avgCost:502.10, exchange:'NYSE',  sector:'ind'  },
+  { ticker:'PEP',   yfSym:'PEP',      name:'PepsiCo',                shares:50,    avgCost:168.78, exchange:'NYSE',  sector:'cons' },
+  { ticker:'DIS',   yfSym:'DIS',      name:'Walt Disney',            shares:50,    avgCost:100.32, exchange:'NYSE',  sector:'cons' },
+  { ticker:'UPS',   yfSym:'UPS',      name:'UPS',                    shares:50,    avgCost:109.92, exchange:'NYSE',  sector:'ind'  },
+  { ticker:'OXY',   yfSym:'OXY',      name:'Occidental Petroleum',   shares:100,   avgCost:47.30,  exchange:'NYSE',  sector:'ind'  },
+  { ticker:'BABA',  yfSym:'BABA',     name:'Alibaba',                shares:40,    avgCost:122.02, exchange:'NYSE',  sector:'tech' },
+  { ticker:'SMCI',  yfSym:'SMCI',     name:'Super Micro Computer',   shares:165,   avgCost:30.64,  exchange:'NYSE',  sector:'tech' },
+  { ticker:'UBS',   yfSym:'UBS',      name:'UBS Group',              shares:210,   avgCost:42.05,  exchange:'NYSE',  sector:'fin'  },
+  { ticker:'NU',    yfSym:'NU',       name:'Nu Holdings',            shares:400,   avgCost:14.52,  exchange:'NYSE',  sector:'fin'  },
+  { ticker:'ADS',   yfSym:'ADS.DE',   name:'Adidas AG',              shares:58,    avgCost:134.97, exchange:'IBIS',  sector:'cons' },
+  { ticker:'AIR',   yfSym:'AIR.PA',   name:'Airbus SE',              shares:70.38, avgCost:164.08, exchange:'SBF',   sector:'ind'  },
+  { ticker:'MC',    yfSym:'MC.PA',    name:'LVMH',                   shares:28,    avgCost:510.26, exchange:'SBF',   sector:'cons' },
+  { ticker:'1810',  yfSym:'1810.HK',  name:'Xiaomi',                 shares:204,   avgCost:32.84,  exchange:'SEHK',  sector:'tech' },
+  { ticker:'1211',  yfSym:'1211.HK',  name:'BYD',                    shares:76.57, avgCost:98.53,  exchange:'SEHK',  sector:'tech' },
+  { ticker:'MTLN',  yfSym:'MTLN.L',   name:'Metlen Energy & Metals', shares:146,   avgCost:35.40,  exchange:'LSE',   sector:'ind'  },
+  { ticker:'EMAAR', yfSym:'EMAAR.DU', name:'Emaar Properties',       shares:409,   avgCost:12.11,  exchange:'DFM',   sector:'re'   },
 ];
 
 const CLOSED = [
@@ -207,38 +223,8 @@ const CLOSED = [
     entryDate:'Dec 2025', exitDate:'April 2026', entryPrice:229.94, exitPrice:288.51 },
 ];
 
-// ── Cache ──────────────────────────────────────────────────────
-function getCached(){try{const r=localStorage.getItem(CACHE_KEY);if(!r)return null;const{p,ts}=JSON.parse(r);return Date.now()-ts<CACHE_TTL?p:null;}catch(e){return null;}}
-function setCache(p){try{localStorage.setItem(CACHE_KEY,JSON.stringify({p,ts:Date.now()}));}catch(e){}}
-
-// ── Twelve Data — single batch call for all US stocks ──────────
-async function fetchPrices(){
-  const cached=getCached();
-  if(cached&&Object.keys(cached).length>=15){
-    document.getElementById('lastUpdate').textContent='EOD · '+new Date().toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
-    return cached;
-  }
-  const us=HOLDINGS.filter(h=>h.live);
-  const symbols=us.map(h=>h.ticker).join(',');
-  const url=`https://api.twelvedata.com/quote?symbol=${encodeURIComponent(symbols)}&apikey=${TD_KEY}`;
-  const results={};
-  try{
-    const res=await fetch(url);
-    const data=await res.json();
-    us.forEach(h=>{
-      const q=us.length===1?data:data[h.ticker];
-      if(q&&!q.code&&q.close){
-        results[h.ticker]={
-          price:parseFloat(q.close),
-          prevClose:parseFloat(q.previous_close||q.close),
-          change:parseFloat(q.percent_change||0)
-        };
-      }
-    });
-    setCache(results);
-  }catch(e){}
-  return results;
-}
+// ── Keep server awake — ping every 10 minutes ──────────────────
+setInterval(() => fetch(PING_URL).catch(()=>{}), 10 * 60 * 1000);
 
 // ── Helpers ────────────────────────────────────────────────────
 function fmt(n,dp=2){if(n==null||isNaN(n))return'—';return n.toLocaleString('en-US',{minimumFractionDigits:dp,maximumFractionDigits:dp});}
@@ -246,67 +232,99 @@ function sectorLabel(s){return{tech:'Technology',fin:'Financials',ind:'Industria
 function holdingPeriod(a,b){try{const d1=new Date(a+' 1'),d2=new Date(b+' 1');const diff=Math.round((d2-d1)/(1000*60*60*24*30.4));if(diff<=0)return'< 1 mo';if(diff===1)return'1 month';if(diff<12)return diff+' months';const y=Math.floor(diff/12),m=diff%12;return y+'y '+(m?m+'m':'');}catch(e){return'—';}}
 function switchTab(tab){document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));document.querySelector(`[data-tab="${tab}"]`).classList.add('active');document.getElementById(`panel-${tab}`).classList.add('active');}
 
-// ── Render ─────────────────────────────────────────────────────
-async function loadCurrent(){
-  const body=document.getElementById('tableBody');
-  body.innerHTML=`<tr class="loading-row"><td colspan="8"><span class="spinner"></span>Loading prices…</td></tr>`;
+// ── Fetch prices from Render backend ──────────────────────────
+async function fetchPrices() {
+  // Show wake-up message if server might be sleeping
+  const wakeEl = document.getElementById('wakeMsg');
+  const wakeTimer = setTimeout(() => {
+    if (wakeEl) wakeEl.textContent = 'Waking up price server… this takes ~30s if idle';
+  }, 4000);
 
-  const priceMap=await fetchPrices();
-  let totalEquity=0;
+  try {
+    const res  = await fetch(API_URL);
+    clearTimeout(wakeTimer);
+    if (wakeEl) wakeEl.textContent = '';
+    const data = await res.json();
+    if (!data.success) return {};
 
-  const rows=HOLDINGS.map(h=>{
-    const r=priceMap[h.ticker];
-    const price=r?.price||h.avgCost;
-    const mktVal=price*h.shares;
-    const pnlPct=((price-h.avgCost)/h.avgCost)*100;
-    const dayPct=r?.change||0;
-    totalEquity+=mktVal;
-    return{h,price,mktVal,pnlPct,dayPct,fetched:!!r?.price};
+    // Remap YF symbols to display tickers
+    const mapped = {};
+    Object.entries(data.prices).forEach(([yfSym, priceData]) => {
+      const displayTicker = SYMBOL_MAP[yfSym];
+      if (displayTicker) mapped[displayTicker] = priceData;
+    });
+    return mapped;
+  } catch(e) {
+    clearTimeout(wakeTimer);
+    if (wakeEl) wakeEl.textContent = 'Could not reach price server — showing cost basis';
+    return {};
+  }
+}
+
+// ── Render table ───────────────────────────────────────────────
+async function loadCurrent() {
+  const body = document.getElementById('tableBody');
+  body.innerHTML = `<tr class="loading-row"><td colspan="8"><span class="spinner"></span>Loading prices…<div class="wake-msg" id="wakeMsg"></div></td></tr>`;
+
+  const priceMap = await fetchPrices();
+  let totalEquity = 0;
+
+  const rows = HOLDINGS.map(h => {
+    const r      = priceMap[h.ticker];
+    const price  = r?.price  || h.avgCost;
+    const mktVal = price * h.shares;
+    const pnlPct = ((price - h.avgCost) / h.avgCost) * 100;
+    const dayPct = r?.change || 0;
+    totalEquity += mktVal;
+    return { h, price, mktVal, pnlPct, dayPct, fetched: !!r?.price };
   });
 
-  const totalPort=totalEquity+CASH_USD;
-  const eqPct=(totalEquity/totalPort)*100;
-  const cashPct=(CASH_USD/totalPort)*100;
-  let dayChgW=0;
-  rows.forEach(r=>{dayChgW+=r.dayPct*(r.mktVal/totalEquity);});
-  rows.sort((a,b)=>b.mktVal-a.mktVal);
-  const maxMV=rows[0].mktVal;
-  const maxAbs=Math.max(...rows.map(r=>Math.abs(r.pnlPct)),1);
-  const liveCount=rows.filter(r=>r.fetched).length;
+  const totalPort = totalEquity + CASH_USD;
+  const eqPct     = (totalEquity / totalPort) * 100;
+  const cashPct   = (CASH_USD   / totalPort) * 100;
+  let dayChgW = 0;
+  rows.forEach(r => { dayChgW += r.dayPct * (r.mktVal / totalEquity); });
+  rows.sort((a,b) => b.mktVal - a.mktVal);
+  const maxMV     = rows[0].mktVal;
+  const maxAbs    = Math.max(...rows.map(r => Math.abs(r.pnlPct)), 1);
+  const liveCount = rows.filter(r => r.fetched).length;
 
-  body.innerHTML='';
-  rows.forEach(({h,price,mktVal,pnlPct,dayPct,fetched})=>{
-    const portW=(mktVal/totalPort)*100;
-    const barW=(mktVal/maxMV)*100;
-    const pColor=pnlPct>=0?'var(--up)':'var(--down)';
-    const dClass=dayPct>0?'up':dayPct<0?'down':'flat';
-    const dSign=dayPct>0?'▲':dayPct<0?'▼':'—';
-    const retBarW=Math.min((Math.abs(pnlPct)/maxAbs)*100,100);
-    // For non-live positions show "Cost basis" label instead of asterisk
-    const priceDisplay = fetched
-      ? `$${fmt(price)}`
-      : `<span style="color:var(--muted);font-size:10px">Cost basis</span>`;
-    const tr=document.createElement('tr');
-    tr.innerHTML=`
+  body.innerHTML = '';
+  rows.forEach(({ h, price, mktVal, pnlPct, dayPct, fetched }) => {
+    const portW  = (mktVal / totalPort) * 100;
+    const barW   = (mktVal / maxMV) * 100;
+    const pColor = pnlPct >= 0 ? 'var(--up)' : 'var(--down)';
+    const dClass = dayPct  > 0 ? 'up' : dayPct < 0 ? 'down' : 'flat';
+    const dSign  = dayPct  > 0 ? '▲' : dayPct < 0 ? '▼' : '—';
+    const retBarW= Math.min((Math.abs(pnlPct) / maxAbs) * 100, 100);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
       <td><div class="cell-ticker"><div class="ticker-icon">${h.ticker.slice(0,5)}</div><div class="ticker-info"><div class="ticker-sym">${h.ticker}</div><div class="ticker-name">${h.name}</div></div></div></td>
       <td class="col-hide2"><span class="exch-badge">${h.exchange}</span></td>
       <td class="col-hide"><span class="sector-tag s-${h.sector}">${sectorLabel(h.sector)}</span></td>
       <td class="right"><div class="avg-cost-cell"><span class="avg-cost-val">$${fmt(h.avgCost)}</span><span class="avg-cost-label">avg open</span></div></td>
-      <td class="right" style="font-size:12px;font-weight:500">${priceDisplay}</td>
-      <td class="right"><div class="return-block"><span class="return-pct" style="color:${fetched?pColor:'var(--muted)'}">
-        ${fetched?(pnlPct>=0?'+':'')+fmt(pnlPct,1)+'%':'—'}
-      </span>${fetched?`<div class="return-bar-wrap"><div class="return-bar" style="width:${retBarW}%;background:${pColor};opacity:0.7"></div></div>`:''}</div></td>
-      <td class="center col-hide"><span class="chg-pill ${fetched?dClass:'flat'}">${fetched&&dayPct?dSign+' '+Math.abs(dayPct).toFixed(2)+'%':'—'}</span></td>
+      <td class="right" style="font-size:12px;font-weight:500;color:${fetched?'var(--text)':'var(--muted)'}">
+        ${fetched ? '$'+fmt(price) : '<span style="font-size:10px">Cost basis</span>'}
+      </td>
+      <td class="right"><div class="return-block">
+        <span class="return-pct" style="color:${fetched?pColor:'var(--muted)'}">
+          ${fetched ? (pnlPct>=0?'+':'')+fmt(pnlPct,1)+'%' : '—'}
+        </span>
+        ${fetched?`<div class="return-bar-wrap"><div class="return-bar" style="width:${retBarW}%;background:${pColor};opacity:0.7"></div></div>`:''}
+      </div></td>
+      <td class="center col-hide"><span class="chg-pill ${fetched?dClass:'flat'}">
+        ${fetched && dayPct ? dSign+' '+Math.abs(dayPct).toFixed(2)+'%' : '—'}
+      </span></td>
       <td class="right"><div class="weight-cell"><div class="weight-track"><div class="weight-fill equity" style="width:${barW}%"></div></div><span class="weight-pct">${fmt(portW,1)}%</span></div></td>
     `;
     body.appendChild(tr);
   });
 
   // Cash row
-  const cashBarW=(CASH_USD/maxMV)*100;
-  const cashRow=document.createElement('tr');
-  cashRow.className='cash-row';
-  cashRow.innerHTML=`
+  const cashBarW = (CASH_USD / maxMV) * 100;
+  const cashRow  = document.createElement('tr');
+  cashRow.className = 'cash-row';
+  cashRow.innerHTML = `
     <td><div class="cell-ticker"><div class="ticker-icon cash-icon">€</div><div class="ticker-info"><div class="ticker-sym">CASH</div><div class="ticker-name">Euro Cash Reserve</div></div></div></td>
     <td class="col-hide2"><span class="exch-badge">EUR</span></td>
     <td class="col-hide"><span class="sector-tag s-cash">Cash</span></td>
@@ -318,47 +336,48 @@ async function loadCurrent(){
   `;
   body.appendChild(cashRow);
 
-  const dClass2=dayChgW>=0?'positive':'negative';
-  const dSign2=dayChgW>=0?'▲':'▼';
-  document.getElementById('sumEquity').textContent=fmt(eqPct,1)+'%';
-  document.getElementById('sumCash').textContent=fmt(cashPct,1)+'%';
-  document.getElementById('sumDay').className='sum-value '+dClass2;
-  document.getElementById('sumDay').textContent=dSign2+' '+Math.abs(dayChgW).toFixed(2)+'%';
-  document.getElementById('posCount').textContent=rows.length+' positions · '+liveCount+' live prices';
-  document.getElementById('badgeCurrent').textContent=rows.length;
-  const now=new Date();
-  if(liveCount>0){
-    document.getElementById('lastUpdate').textContent='EOD · '+now.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
-  }
+  // Summary cards
+  const dClass2 = dayChgW >= 0 ? 'positive' : 'negative';
+  const dSign2  = dayChgW >= 0 ? '▲' : '▼';
+  document.getElementById('sumEquity').textContent    = fmt(eqPct,1) + '%';
+  document.getElementById('sumCash').textContent      = fmt(cashPct,1) + '%';
+  document.getElementById('sumDay').className         = 'sum-value ' + dClass2;
+  document.getElementById('sumDay').textContent       = dSign2 + ' ' + Math.abs(dayChgW).toFixed(2) + '%';
+  document.getElementById('posCount').textContent     = rows.length + ' positions · ' + liveCount + '/25 live';
+  document.getElementById('badgeCurrent').textContent = rows.length;
+  const now = new Date();
+  document.getElementById('lastUpdate').textContent   =
+    'EOD · ' + now.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'});
 }
 
-function renderClosed(){
-  const container=document.getElementById('closedContent');
-  document.getElementById('badgeClosed').textContent=CLOSED.length;
-  if(CLOSED.length===0){
-    document.getElementById('closedCount').textContent='0';
-    document.getElementById('closedWinRate').textContent='—';
-    document.getElementById('closedAvgReturn').textContent='—';
-    document.getElementById('closedBest').textContent='—';
-    document.getElementById('closedBestName').textContent='no trades yet';
-    container.innerHTML=`<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-title">No closed positions yet</div><div class="empty-sub">Closed trades will appear here once positions are exited.<br>Track record, holding periods and returns will be displayed automatically.</div><div class="empty-badge"><span>Building the track record</span></div></div>`;
+// ── Render closed tab ──────────────────────────────────────────
+function renderClosed() {
+  const container = document.getElementById('closedContent');
+  document.getElementById('badgeClosed').textContent = CLOSED.length;
+  if (CLOSED.length === 0) {
+    document.getElementById('closedCount').textContent     = '0';
+    document.getElementById('closedWinRate').textContent   = '—';
+    document.getElementById('closedAvgReturn').textContent = '—';
+    document.getElementById('closedBest').textContent      = '—';
+    document.getElementById('closedBestName').textContent  = 'no trades yet';
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">📋</div><div class="empty-title">No closed positions yet</div><div class="empty-sub">Closed trades will appear here once positions are exited.<br>Track record, holding periods and returns will be displayed automatically.</div><div class="empty-badge"><span>Building the track record</span></div></div>`;
     return;
   }
-  const returns=CLOSED.map(c=>((c.exitPrice-c.entryPrice)/c.entryPrice)*100);
-  const wins=returns.filter(r=>r>0).length;
-  const winRate=(wins/CLOSED.length)*100;
-  const avgRet=returns.reduce((a,b)=>a+b,0)/returns.length;
-  const bestIdx=returns.indexOf(Math.max(...returns));
-  document.getElementById('closedCount').textContent=CLOSED.length;
-  document.getElementById('closedWinRate').className='sum-value '+(winRate>=50?'positive':'negative');
-  document.getElementById('closedWinRate').textContent=fmt(winRate,0)+'%';
-  document.getElementById('closedAvgReturn').className='sum-value '+(avgRet>=0?'positive':'negative');
-  document.getElementById('closedAvgReturn').textContent=(avgRet>=0?'+':'')+fmt(avgRet,1)+'%';
-  document.getElementById('closedBest').className='sum-value positive';
-  document.getElementById('closedBest').textContent='+'+fmt(returns[bestIdx],1)+'%';
-  document.getElementById('closedBestName').textContent=CLOSED[bestIdx].ticker;
-  const sorted=[...CLOSED].map((c,i)=>({...c,ret:returns[i]})).sort((a,b)=>new Date(b.exitDate+' 1')-new Date(a.exitDate+' 1'));
-  container.innerHTML=`
+  const returns = CLOSED.map(c => ((c.exitPrice-c.entryPrice)/c.entryPrice)*100);
+  const wins    = returns.filter(r=>r>0).length;
+  const winRate = (wins/CLOSED.length)*100;
+  const avgRet  = returns.reduce((a,b)=>a+b,0)/returns.length;
+  const bestIdx = returns.indexOf(Math.max(...returns));
+  document.getElementById('closedCount').textContent     = CLOSED.length;
+  document.getElementById('closedWinRate').className     = 'sum-value '+(winRate>=50?'positive':'negative');
+  document.getElementById('closedWinRate').textContent   = fmt(winRate,0)+'%';
+  document.getElementById('closedAvgReturn').className   = 'sum-value '+(avgRet>=0?'positive':'negative');
+  document.getElementById('closedAvgReturn').textContent = (avgRet>=0?'+':'')+fmt(avgRet,1)+'%';
+  document.getElementById('closedBest').className        = 'sum-value positive';
+  document.getElementById('closedBest').textContent      = '+'+fmt(returns[bestIdx],1)+'%';
+  document.getElementById('closedBestName').textContent  = CLOSED[bestIdx].ticker;
+  const sorted = [...CLOSED].map((c,i)=>({...c,ret:returns[i]})).sort((a,b)=>new Date(b.exitDate+' 1')-new Date(a.exitDate+' 1'));
+  container.innerHTML = `
     <div class="section-header"><div class="section-title">Closed Positions</div><div style="font-size:9px;color:var(--faint);letter-spacing:.07em">${CLOSED.length} trades</div></div>
     <div class="table-wrap"><table>
       <thead><tr><th>Instrument</th><th class="col-hide2">Exch</th><th class="col-hide">Sector</th><th class="center col-hide">Opened</th><th class="center col-hide">Closed</th><th class="center col-hide">Duration</th><th class="right">Entry</th><th class="right">Exit</th><th class="right">Return</th><th class="center">Result</th></tr></thead>
@@ -380,9 +399,10 @@ function renderClosed(){
   `;
 }
 
+// ── Init ──────────────────────────────────────────────────────
 loadCurrent();
 renderClosed();
-setInterval(loadCurrent, 8*60*60*1000);
+setInterval(loadCurrent, 8 * 60 * 60 * 1000);
 </script>
 </body>
 </html>
